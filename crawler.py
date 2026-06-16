@@ -49,7 +49,7 @@ def fetch_new_data(existing_periods, pages=3, page_size=30):
                     })
                 # 如果这一页全部已存在，可以提前终止（因为后面更旧的期号更可能已存在）
                 # 但为了保险，我们继续请求下一页（最多pages页）
-                print(f"第 {page} 页获取 {len(data['result'])} 条，新增 {len(new_items)} 条")
+                print(f"第 {page} 页获取 {len(data['result'])} 条，累计新增 {len(new_items)} 条")
             else:
                 break
         except Exception as e:
@@ -133,8 +133,6 @@ def update_csv():
         content = "<br><br>".join(prize_messages)
         send_wechat_message(title, content)
     else:
-        # 可选：无中奖时也发送一条通知（自行决定）
-        # send_wechat_message("双色球数据更新", "今日无中奖，继续加油！")
         print("本次更新无中奖记录")
 
 def load_all_data():
@@ -153,8 +151,4 @@ def load_all_data():
 if __name__ == '__main__':
     print("开始更新数据...")
     update_csv()
-<<<<<<< HEAD
     print("更新完成")
-=======
-    print("更新完成")
->>>>>>> 15c5fb7fa8a7221c213d18dbd72f22a56059cef6
