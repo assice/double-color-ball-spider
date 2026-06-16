@@ -1,3 +1,6 @@
+# crawler.py
+# ... 其他导入 ...
+from wechat_push import send_wechat_message
 import os
 import csv
 import requests
