@@ -1,11 +1,14 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for
 from config_manager import load_config, save_config
-from crawler import load_all_data
+from crawler import load_all_data, update_csv
 from prize_checker import check_prize
-import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'ssq-secret'
+app.config['SECRET_KEY'] = 'ssq-secret-key-change-in-production'
+
+# 用于 /update 路由的简单密钥（建议改为从环境变量读取）
+UPDATE_SECRET_KEY = os.environ.get('UPDATE_SECRET_KEY', 'your_secret_key_here')
 
 def filter_and_calc(cfg):
     all_data = load_all_data()
@@ -90,8 +93,21 @@ def index():
                            stats=stats,
                            latest_period=latest_period)
 
+@app.route('/update')
+def manual_update():
+    key = request.args.get('key', '')
+    if key != UPDATE_SECRET_KEY:
+        return "Unauthorized: invalid key", 401
+    try:
+        from crawler import update_csv
+        update_csv()
+        return "数据更新完成", 200
+    except Exception as e:
+        return f"更新失败: {str(e)}", 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    # 首次启动不自动更新（由Cron Job负责）
-    print("🚀 Flask 应用启动，数据更新由独立的 Cron Job 负责")
+    # 首次启动时可选执行一次更新（注释掉，避免启动延迟）
+    # 数据由外部定时任务触发更新
+    print("🚀 Flask 应用启动，数据更新由外部定时服务触发（如 cron-job.org）")
     app.run(host='0.0.0.0', port=port, debug=False)
