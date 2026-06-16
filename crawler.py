@@ -153,4 +153,8 @@ def load_all_data():
 if __name__ == '__main__':
     print("开始更新数据...")
     update_csv()
+<<<<<<< HEAD
     print("更新完成")
+=======
+    print("更新完成")
+>>>>>>> 15c5fb7fa8a7221c213d18dbd72f22a56059cef6
