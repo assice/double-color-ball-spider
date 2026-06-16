@@ -3,7 +3,7 @@ import requests
 
 # --- 配置区域 ---
 # 在这里填写你在 PushPlus 官网获取的 Token
-PUSHPLUS_TOKEN = "c4a35d3f179041f690acb0f67e55eec4"
+PUSHPLUS_TOKEN = ""
 # 如果你想推送到群组，在这里填写群组编码，否则留空
 PUSHPLUS_TOPIC = "" 
 
