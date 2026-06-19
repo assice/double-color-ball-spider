@@ -127,26 +127,21 @@ def manual_update():
 
 @app.route('/rebuild')
 def rebuild():
+    """
+    强制更新数据（合并去重，不删除已有数据）
+    """
     key = request.args.get('key', '')
     if key != UPDATE_SECRET_KEY:
         return "Unauthorized: invalid key", 401
+
     try:
-        import csv
-        from crawler import fetch_from_html, CSV_PATH
-        if os.path.isfile(CSV_PATH):
-            os.remove(CSV_PATH)
-            print("🗑️ 已删除旧 CSV")
-        all_data = fetch_from_html()
-        if not all_data:
-            return "❌ 解析数据失败，请检查 HTML 结构是否变化", 500
-        all_data.sort(key=lambda x: int(x['期号']), reverse=True)
-        with open(CSV_PATH, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=['期号', '开奖日期', '红球', '蓝球'])
-            writer.writeheader()
-            writer.writerows(all_data)
-        return f"✅ 重建完成，共写入 {len(all_data)} 条记录，最新期号：{all_data[0]['期号']}", 200
+        result = ensure_latest()
+        if result:
+            return "✅ 数据已合并更新，最新期已添加", 200
+        else:
+            return "✅ 数据已是最新，无新增记录", 200
     except Exception as e:
-        return f"❌ 重建失败: {str(e)}", 500
+        return f"❌ 更新失败: {str(e)}", 500
 
 
 @app.route('/debug')
@@ -154,7 +149,7 @@ def debug():
     from crawler import load_all_data, CSV_PATH
     import os
     if not os.path.isfile(CSV_PATH):
-        return "CSV 文件不存在，请先访问 /rebuild 重建数据"
+        return "CSV 文件不存在，请先访问 /rebuild 更新数据"
     data = load_all_data()
     if not data:
         return "CSV 为空"
