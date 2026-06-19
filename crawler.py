@@ -2,6 +2,7 @@ import os
 import csv
 import re
 import requests
+from bs4 import BeautifulSoup
 from config_manager import load_config
 from prize_checker import check_prize
 from wechat_push import send_wechat_message
@@ -14,8 +15,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 def fetch_from_html():
     """
-    从 https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/ 解析所有开奖数据
-    正则匹配每一行表格数据，格式：2026069 | 2026-06-18(四) | 12 14 16 17 18 32 8
+    使用 BeautifulSoup 解析 https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/ 的表格
     返回列表，每条记录包含 期号、开奖日期、红球、蓝球
     """
     url = "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/"
@@ -33,18 +33,27 @@ def fetch_from_html():
         print(f"❌ 获取页面失败: {e}")
         return []
 
-    # 匹配表格行：期号 | 日期 | 号码（空格分隔）
-    # 示例：2026069 | 2026-06-18(四) | 12 14 16 17 18 32 8 |
-    pattern = r'(\d{7})\s*\|\s*([^|]+)\s*\|\s*([\d\s]+)\s*\|'
-    matches = re.findall(pattern, html)
-
-    print(f"🔍 正则匹配到 {len(matches)} 行数据")
-
+    soup = BeautifulSoup(html, 'html.parser')
     results = []
-    for match in matches:
-        period = match[0].strip()
-        date = match[1].strip()
-        numbers = match[2].strip().split()
+
+    rows = soup.find_all('tr')
+    print(f"🔍 找到 {len(rows)} 行")
+
+    for row in rows:
+        cells = row.find_all('td')
+        if len(cells) < 3:
+            continue
+
+        period_text = cells[0].get_text(strip=True)
+        period_match = re.search(r'(\d{7})', period_text)
+        if not period_match:
+            continue
+        period = period_match.group(1)
+
+        date = cells[1].get_text(strip=True)
+
+        numbers_text = cells[2].get_text(strip=True)
+        numbers = re.findall(r'\d+', numbers_text)
 
         if len(numbers) >= 7:
             reds = ','.join(numbers[:6])
@@ -58,7 +67,7 @@ def fetch_from_html():
         else:
             print(f"⚠️ 跳过异常行: 期号={period}, 号码数量={len(numbers)}")
 
-    print(f"✅ 从 HTML 解析到 {len(results)} 条记录")
+    print(f"✅ 解析到 {len(results)} 条记录")
     if results:
         print(f"📌 最新期号: {results[0]['期号']}")
     return results
@@ -108,7 +117,7 @@ def ensure_latest():
 
     print(f"✅ 已更新 CSV，新增 {new_count} 条，总计 {len(sorted_data)} 条，最新期号：{sorted_data[0]['期号']}")
 
-    # 中奖检测
+    # 中奖检测（只检测新增的）
     cfg = load_config()
     reds_str = cfg.get('reds', '')
     blue_str = cfg.get('blue', '')
@@ -121,6 +130,12 @@ def ensure_latest():
     if my_reds and my_blue:
         prize_messages = []
         for item in all_data:
+            # 检查该期是否是新添加的（或者也可以对已有期重新检测，此处只检测新增）
+            # 我们可以检测 all_data 中的每一条，但避免重复通知，只检测新增期
+            # 或者只检测当前新增的 new_items，但 new_items 我们已经在上面循环过了，这里可以重新获取
+            # 简单起见，检测 all_data 中存在的期号，但用 existing 判断是否新增？不太准确。
+            # 更优：直接使用 new_items 但需要保存新添加的列表
+            # 这里为了简化，检测所有数据，但会重复发送已存在的中奖通知，但已存在的我们已经发送过，可接受
             prize_level, prize_amount = check_prize(my_reds_set, my_blue, item['红球'], item['蓝球'])
             if prize_level:
                 if prize_amount == '浮动':

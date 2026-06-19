@@ -1,7 +1,7 @@
 import os
 import sys
 from io import StringIO
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from config_manager import load_config, save_config
 from crawler import load_all_data, ensure_latest
 from prize_checker import check_prize
@@ -127,7 +127,6 @@ def manual_update():
 
 @app.route('/rebuild')
 def rebuild():
-    """强制重建：删除旧CSV，从HTML重新解析所有数据"""
     key = request.args.get('key', '')
     if key != UPDATE_SECRET_KEY:
         return "Unauthorized: invalid key", 401
@@ -161,6 +160,70 @@ def debug():
         return "CSV 为空"
     latest = max(data, key=lambda x: int(x['期号']))
     return f"✅ 最新期号：{latest['期号']}，总数：{len(data)} 条"
+
+
+@app.route('/check', methods=['POST'])
+def check_period():
+    """
+    手动输入期号和号码，分析是否中奖
+    """
+    period = request.form.get('period', '').strip()
+    reds_input = request.form.get('reds', '').strip()
+    blue_input = request.form.get('blue', '').strip()
+
+    if not period or not reds_input or not blue_input:
+        return jsonify({'status': 'error', 'message': '请完整填写期号、红球和蓝球'})
+
+    reds_list = [r.strip() for r in reds_input.split(',') if r.strip()]
+    if len(reds_list) != 6:
+        return jsonify({'status': 'error', 'message': '红球必须为6个号码，用逗号分隔'})
+
+    all_data = load_all_data()
+    target = None
+    for row in all_data:
+        if row['期号'] == period:
+            target = row
+            break
+
+    if not target:
+        return jsonify({'status': 'error', 'message': f'未找到期号 {period} 的数据，请先更新数据'})
+
+    cfg = load_config()
+    multiplier = int(cfg.get('multiplier', 2))
+    my_reds_set = set(reds_list)
+    my_blue = blue_input
+
+    prize_level, prize_amount = check_prize(my_reds_set, my_blue, target['红球'], target['蓝球'])
+
+    if prize_level:
+        if prize_amount == '浮动':
+            amount_display = '浮动奖金'
+        elif isinstance(prize_amount, int):
+            total = prize_amount * multiplier
+            amount_display = f"{total} 元 (单注 {prize_amount} 元 × {multiplier}倍)"
+        else:
+            amount_display = str(prize_amount)
+        result = {
+            'status': 'win',
+            'level': prize_level,
+            'amount': amount_display,
+            'period': period,
+            'date': target['开奖日期'],
+            'actual_reds': target['红球'],
+            'actual_blue': target['蓝球']
+        }
+    else:
+        result = {
+            'status': 'no_win',
+            'level': '未中奖',
+            'amount': '0',
+            'period': period,
+            'date': target['开奖日期'],
+            'actual_reds': target['红球'],
+            'actual_blue': target['蓝球']
+        }
+
+    return jsonify(result)
 
 
 @app.route('/test_push')
