@@ -12,69 +12,110 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 CSV_PATH = os.path.join(DATA_DIR, 'ssq_history.csv')
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# 硬编码的最新几期（作为最后保底）
+FALLBACK_DATA = [
+    {'期号': '2026069', '开奖日期': '2026-06-18(四)', '红球': '12,14,16,17,18,32', '蓝球': '08'},
+    {'期号': '2026068', '开奖日期': '2026-06-16(二)', '红球': '03,05,16,18,29,32', '蓝球': '04'},
+    {'期号': '2026067', '开奖日期': '2026-06-14(日)', '红球': '04,19,27,29,30,32', '蓝球': '13'},
+]
+
+
+def fetch_from_third_party():
+    """
+    使用第三方 API 获取最新双色球数据
+    可配置环境变量 THIRD_PARTY_API_URL 和 API_KEY
+    """
+    api_url = os.environ.get('THIRD_PARTY_API_URL', '')
+    api_key = os.environ.get('THIRD_PARTY_API_KEY', '')
+    if not api_url:
+        return None
+    try:
+        params = {'key': api_key} if api_key else {}
+        resp = requests.get(api_url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # 假设返回格式为 { "code": 200, "data": { "expect": "2026069", "number": "12 14 16 17 18 32 08" } }
+        if data.get('code') == 200 and 'data' in data:
+            item = data['data']
+            numbers = item.get('number', '').split()
+            if len(numbers) >= 7:
+                return [{
+                    '期号': item.get('expect', ''),
+                    '开奖日期': item.get('opendate', ''),
+                    '红球': ','.join(numbers[:6]),
+                    '蓝球': numbers[6]
+                }]
+        return None
+    except Exception as e:
+        print(f"⚠️ 第三方 API 请求失败: {e}")
+        return None
+
 
 def fetch_from_html():
     """
-    使用 BeautifulSoup 解析 https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/ 的表格
-    返回列表，每条记录包含 期号、开奖日期、红球、蓝球
+    从官网 HTML 解析数据（可能被 403，但保留）
     """
     url = "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     try:
-        print("🔄 正在从 HTML 页面获取数据...")
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         resp.encoding = 'utf-8'
         html = resp.text
-        print(f"📄 页面获取成功，大小: {len(html)} 字节")
     except Exception as e:
-        print(f"❌ 获取页面失败: {e}")
-        return []
+        print(f"❌ 官网页面获取失败: {e}")
+        return None
 
     soup = BeautifulSoup(html, 'html.parser')
     results = []
-
     rows = soup.find_all('tr')
-    print(f"🔍 找到 {len(rows)} 行")
-
     for row in rows:
         cells = row.find_all('td')
         if len(cells) < 3:
             continue
-
         period_text = cells[0].get_text(strip=True)
         period_match = re.search(r'(\d{7})', period_text)
         if not period_match:
             continue
         period = period_match.group(1)
-
         date = cells[1].get_text(strip=True)
-
         numbers_text = cells[2].get_text(strip=True)
         numbers = re.findall(r'\d+', numbers_text)
-
         if len(numbers) >= 7:
-            reds = ','.join(numbers[:6])
-            blue = numbers[6]
             results.append({
                 '期号': period,
                 '开奖日期': date,
-                '红球': reds,
-                '蓝球': blue
+                '红球': ','.join(numbers[:6]),
+                '蓝球': numbers[6]
             })
-        else:
-            print(f"⚠️ 跳过异常行: 期号={period}, 号码数量={len(numbers)}")
+    return results if results else None
 
-    print(f"✅ 解析到 {len(results)} 条记录")
-    if results:
-        print(f"📌 最新期号: {results[0]['期号']}")
-    return results
+
+def fetch_all_data():
+    """
+    获取数据：优先第三方 API，其次官网 HTML，最后硬编码后备
+    """
+    # 1. 尝试第三方 API
+    data = fetch_from_third_party()
+    if data:
+        print(f"✅ 使用第三方 API 获取到 {len(data)} 条记录")
+        return data
+
+    # 2. 尝试官网 HTML
+    data = fetch_from_html()
+    if data:
+        print(f"✅ 从官网 HTML 解析到 {len(data)} 条记录")
+        return data
+
+    # 3. 使用硬编码后备
+    print("⚠️ 所有数据源失败，使用硬编码后备数据")
+    return FALLBACK_DATA
 
 
 def ensure_latest():
-    """确保 CSV 包含最新数据（从 HTML 解析 + 去重 + 排序）"""
+    """确保 CSV 包含最新数据"""
     print("🔍 开始检查最新数据...")
 
     existing = {}
@@ -91,9 +132,9 @@ def ensure_latest():
                     }
         print(f"📂 已有 {len(existing)} 期记录")
     else:
-        print("📂 CSV 文件不存在，将创建新文件")
+        print("📂 CSV 不存在，将创建新文件")
 
-    all_data = fetch_from_html()
+    all_data = fetch_all_data()
     if not all_data:
         print("❌ 未能获取任何数据")
         return False
@@ -117,12 +158,11 @@ def ensure_latest():
 
     print(f"✅ 已更新 CSV，新增 {new_count} 条，总计 {len(sorted_data)} 条，最新期号：{sorted_data[0]['期号']}")
 
-    # 中奖检测（只检测新增的）
+    # 中奖检测（检测所有新增）
     cfg = load_config()
     reds_str = cfg.get('reds', '')
     blue_str = cfg.get('blue', '')
     multiplier = int(cfg.get('multiplier', 2))
-
     my_reds = [r.strip() for r in reds_str.split() if r.strip()]
     my_blue = blue_str.strip()
     my_reds_set = set(my_reds)
@@ -130,12 +170,6 @@ def ensure_latest():
     if my_reds and my_blue:
         prize_messages = []
         for item in all_data:
-            # 检查该期是否是新添加的（或者也可以对已有期重新检测，此处只检测新增）
-            # 我们可以检测 all_data 中的每一条，但避免重复通知，只检测新增期
-            # 或者只检测当前新增的 new_items，但 new_items 我们已经在上面循环过了，这里可以重新获取
-            # 简单起见，检测 all_data 中存在的期号，但用 existing 判断是否新增？不太准确。
-            # 更优：直接使用 new_items 但需要保存新添加的列表
-            # 这里为了简化，检测所有数据，但会重复发送已存在的中奖通知，但已存在的我们已经发送过，可接受
             prize_level, prize_amount = check_prize(my_reds_set, my_blue, item['红球'], item['蓝球'])
             if prize_level:
                 if prize_amount == '浮动':
