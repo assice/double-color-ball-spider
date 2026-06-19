@@ -11,11 +11,8 @@ app.config['SECRET_KEY'] = 'ssq-secret-key-change-in-production'
 
 UPDATE_SECRET_KEY = os.environ.get('UPDATE_SECRET_KEY', 'your_secret_key_here')
 
-
 def filter_and_calc(cfg):
-    # 每次加载页面检查更新
     ensure_latest()
-    
     all_data = load_all_data()
     if not all_data:
         return [], {}, None
@@ -79,7 +76,6 @@ def filter_and_calc(cfg):
     }
     return result_list, stats, latest
 
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -98,6 +94,7 @@ def index():
     cfg = load_config()
     results, stats, latest = filter_and_calc(cfg)
     all_data = load_all_data()
+    # 修复：使用 max 按数字排序获取最新期号，而不是依赖顺序
     if all_data:
         latest_period = max(all_data, key=lambda x: int(x['期号']))['期号']
     else:
@@ -108,7 +105,6 @@ def index():
                            stats=stats,
                            latest=latest,
                            latest_period=latest_period)
-
 
 @app.route('/update')
 def manual_update():
@@ -129,45 +125,32 @@ def manual_update():
         sys.stdout = old_stdout
         return f"❌ 更新失败: {str(e)}", 500
 
-
 @app.route('/rebuild')
 def rebuild():
-    """强制重建数据（删除旧CSV，重新从API获取并写入）"""
+    """强制重建数据：删除旧CSV，重新从API获取并写入"""
     key = request.args.get('key', '')
     if key != UPDATE_SECRET_KEY:
         return "Unauthorized: invalid key", 401
-    
     try:
         import csv
         from crawler import fetch_from_api, CSV_PATH
-        
-        # 删除旧文件
         if os.path.isfile(CSV_PATH):
             os.remove(CSV_PATH)
             print("🗑️ 已删除旧 CSV")
-        
-        # 获取所有数据
         all_data = fetch_from_api()
         if not all_data:
             return "❌ 获取数据失败，请稍后重试", 500
-        
-        # 按期号降序排序
         all_data.sort(key=lambda x: int(x['期号']), reverse=True)
-        
-        # 写入新文件
         with open(CSV_PATH, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=['期号', '开奖日期', '红球', '蓝球'])
             writer.writeheader()
             writer.writerows(all_data)
-        
         return f"✅ 重建完成，共写入 {len(all_data)} 条记录，最新期号：{all_data[0]['期号']}", 200
     except Exception as e:
         return f"❌ 重建失败: {str(e)}", 500
 
-
 @app.route('/debug')
 def debug():
-    """查看CSV状态（调试用）"""
     from crawler import load_all_data, CSV_PATH
     import os
     if not os.path.isfile(CSV_PATH):
@@ -177,7 +160,6 @@ def debug():
         return "CSV 为空"
     latest = max(data, key=lambda x: int(x['期号']))
     return f"✅ 最新期号：{latest['期号']}，总数：{len(data)} 条"
-
 
 @app.route('/test_push')
 def test_push():
@@ -190,7 +172,6 @@ def test_push():
         return "✅ 测试消息已发送，请查看微信", 200
     except Exception as e:
         return f"❌ 发送失败: {str(e)}", 500
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
