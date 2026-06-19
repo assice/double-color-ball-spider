@@ -11,17 +11,16 @@ app.config['SECRET_KEY'] = 'ssq-secret-key-change-in-production'
 
 UPDATE_SECRET_KEY = os.environ.get('UPDATE_SECRET_KEY', 'your_secret_key_here')
 
+
 def filter_and_calc(cfg):
     ensure_latest()
     all_data = load_all_data()
     if not all_data:
         return [], {}, None
 
-    # 按期号降序排序（确保最新在前）
     all_data.sort(key=lambda x: int(x['期号']), reverse=True)
     latest = all_data[0] if all_data else None
 
-    # 应用筛选条件
     start_period = cfg.get('start_period', '').strip()
     end_period = cfg.get('end_period', '').strip()
     start_date = cfg.get('start_date', '').strip()
@@ -39,7 +38,6 @@ def filter_and_calc(cfg):
 
     filtered.sort(key=lambda x: int(x['期号']), reverse=True)
 
-    # 中奖检测
     reds_str = cfg.get('reds', '')
     blue_str = cfg.get('blue', '')
     multiplier = int(cfg.get('multiplier', 2))
@@ -76,6 +74,7 @@ def filter_and_calc(cfg):
     }
     return result_list, stats, latest
 
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -94,7 +93,6 @@ def index():
     cfg = load_config()
     results, stats, latest = filter_and_calc(cfg)
     all_data = load_all_data()
-    # 修复：使用 max 按数字排序获取最新期号，而不是依赖顺序
     if all_data:
         latest_period = max(all_data, key=lambda x: int(x['期号']))['期号']
     else:
@@ -105,6 +103,7 @@ def index():
                            stats=stats,
                            latest=latest,
                            latest_period=latest_period)
+
 
 @app.route('/update')
 def manual_update():
@@ -125,21 +124,22 @@ def manual_update():
         sys.stdout = old_stdout
         return f"❌ 更新失败: {str(e)}", 500
 
+
 @app.route('/rebuild')
 def rebuild():
-    """强制重建数据：删除旧CSV，重新从API获取并写入"""
+    """强制重建：删除旧CSV，从HTML重新解析所有数据"""
     key = request.args.get('key', '')
     if key != UPDATE_SECRET_KEY:
         return "Unauthorized: invalid key", 401
     try:
         import csv
-        from crawler import fetch_from_api, CSV_PATH
+        from crawler import fetch_from_html, CSV_PATH
         if os.path.isfile(CSV_PATH):
             os.remove(CSV_PATH)
             print("🗑️ 已删除旧 CSV")
-        all_data = fetch_from_api()
+        all_data = fetch_from_html()
         if not all_data:
-            return "❌ 获取数据失败，请稍后重试", 500
+            return "❌ 解析数据失败，请检查 HTML 结构是否变化", 500
         all_data.sort(key=lambda x: int(x['期号']), reverse=True)
         with open(CSV_PATH, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=['期号', '开奖日期', '红球', '蓝球'])
@@ -149,17 +149,19 @@ def rebuild():
     except Exception as e:
         return f"❌ 重建失败: {str(e)}", 500
 
+
 @app.route('/debug')
 def debug():
     from crawler import load_all_data, CSV_PATH
     import os
     if not os.path.isfile(CSV_PATH):
-        return "CSV 文件不存在"
+        return "CSV 文件不存在，请先访问 /rebuild 重建数据"
     data = load_all_data()
     if not data:
         return "CSV 为空"
     latest = max(data, key=lambda x: int(x['期号']))
     return f"✅ 最新期号：{latest['期号']}，总数：{len(data)} 条"
+
 
 @app.route('/test_push')
 def test_push():
@@ -172,6 +174,7 @@ def test_push():
         return "✅ 测试消息已发送，请查看微信", 200
     except Exception as e:
         return f"❌ 发送失败: {str(e)}", 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

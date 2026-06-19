@@ -14,8 +14,9 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 def fetch_from_html():
     """
-    从 https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/ 解析开奖数据
-    更健壮的匹配：查找包含 7 位数字（期号）和至少 7 个数字（号码）的行
+    从 https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/ 解析所有开奖数据
+    正则匹配每一行表格数据，格式：2026069 | 2026-06-18(四) | 12 14 16 17 18 32 8
+    返回列表，每条记录包含 期号、开奖日期、红球、蓝球
     """
     url = "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/"
     headers = {
@@ -32,21 +33,19 @@ def fetch_from_html():
         print(f"❌ 获取页面失败: {e}")
         return []
 
-    results = []
-
-    # 方法：在页面中查找所有包含 7 位数字的行
-    # 匹配模式：7位数字（期号） + 日期（含括号） + 至少7个数字（号码）
-    # 使用更灵活的正则
-    pattern = r'(\d{7})\s*[|｜]\s*([^|｜]+)\s*[|｜]\s*([\d\s]+)'
+    # 匹配表格行：期号 | 日期 | 号码（空格分隔）
+    # 示例：2026069 | 2026-06-18(四) | 12 14 16 17 18 32 8 |
+    pattern = r'(\d{7})\s*\|\s*([^|]+)\s*\|\s*([\d\s]+)\s*\|'
     matches = re.findall(pattern, html)
-    print(f"🔍 模式1匹配到 {len(matches)} 行")
 
+    print(f"🔍 正则匹配到 {len(matches)} 行数据")
+
+    results = []
     for match in matches:
         period = match[0].strip()
         date = match[1].strip()
-        numbers_str = match[2].strip()
-        # 提取所有数字
-        numbers = re.findall(r'\d+', numbers_str)
+        numbers = match[2].strip().split()
+
         if len(numbers) >= 7:
             reds = ','.join(numbers[:6])
             blue = numbers[6]
@@ -57,58 +56,11 @@ def fetch_from_html():
                 '蓝球': blue
             })
         else:
-            print(f"⚠️ 跳过 {period}: 号码数量不足 ({len(numbers)})")
+            print(f"⚠️ 跳过异常行: 期号={period}, 号码数量={len(numbers)}")
 
-    # 如果上面没匹配到，尝试更宽松的匹配（忽略分隔符）
-    if not results:
-        print("🔄 尝试备用匹配模式...")
-        # 匹配期号 + 日期 + 一串数字（至少7个）
-        pattern2 = r'(\d{7})\s*[|｜]?\s*([^|｜]+?)\s*[|｜]?\s*((?:\d+\s*){7,})'
-        matches2 = re.findall(pattern2, html)
-        print(f"🔍 模式2匹配到 {len(matches2)} 行")
-        for match in matches2:
-            period = match[0].strip()
-            date = match[1].strip()
-            numbers = re.findall(r'\d+', match[2])
-            if len(numbers) >= 7:
-                reds = ','.join(numbers[:6])
-                blue = numbers[6]
-                results.append({
-                    '期号': period,
-                    '开奖日期': date,
-                    '红球': reds,
-                    '蓝球': blue
-                })
-
-    # 最后，如果还没有数据，直接按行解析
-    if not results:
-        print("🔄 尝试按行解析...")
-        lines = html.split('\n')
-        for line in lines:
-            # 查找包含 7 位数字的行，且该行后面有多个数字
-            if re.search(r'\d{7}', line):
-                # 提取所有数字
-                all_nums = re.findall(r'\d+', line)
-                if len(all_nums) >= 8:  # 7位期号 + 至少7个号码
-                    period = all_nums[0]
-                    # 尝试提取日期（包含中文括号）
-                    date_match = re.search(r'(\d{4}-\d{2}-\d{2}\(.)', line)
-                    date = date_match.group(1) if date_match else ''
-                    # 号码从第2个数字开始
-                    nums = all_nums[1:]
-                    if len(nums) >= 7:
-                        reds = ','.join(nums[:6])
-                        blue = nums[6]
-                        results.append({
-                            '期号': period,
-                            '开奖日期': date,
-                            '红球': reds,
-                            '蓝球': blue
-                        })
-
-    print(f"✅ 总共解析到 {len(results)} 条记录")
+    print(f"✅ 从 HTML 解析到 {len(results)} 条记录")
     if results:
-        print(f"📌 最新期号: {results[0]['期号'] if results else '无'}")
+        print(f"📌 最新期号: {results[0]['期号']}")
     return results
 
 
@@ -156,7 +108,7 @@ def ensure_latest():
 
     print(f"✅ 已更新 CSV，新增 {new_count} 条，总计 {len(sorted_data)} 条，最新期号：{sorted_data[0]['期号']}")
 
-    # 中奖检测（只检测新增的）
+    # 中奖检测
     cfg = load_config()
     reds_str = cfg.get('reds', '')
     blue_str = cfg.get('blue', '')
@@ -169,8 +121,6 @@ def ensure_latest():
     if my_reds and my_blue:
         prize_messages = []
         for item in all_data:
-            if item['期号'] not in existing:
-                continue  # 只检测新增的
             prize_level, prize_amount = check_prize(my_reds_set, my_blue, item['红球'], item['蓝球'])
             if prize_level:
                 if prize_amount == '浮动':
